@@ -11,6 +11,6 @@ object ContactsScreen {
         verifyLink(withId(R.id.contacts_important_btn), "https://koronavirus.mzcr.cz/dulezite-kontakty-odkazy")
         verifyLink(withId(R.id.contacts_faq_btn), "https://koronavirus.mzcr.cz/otazky-a-odpovedi")
         scrollTo(R.id.contacts_email)
-        verifyLink(withId(R.id.contacts_email), "https://erouska.cz")
+        verifyLink(withId(R.id.contacts_email), "https://erouska.cz/#chat-open")
     }
 }
