@@ -1,6 +1,7 @@
 package cz.covid19cz.erouska.ui.main
 
-import android.content.*
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
 import android.view.MenuItem
 import android.view.View.GONE
@@ -15,13 +16,11 @@ import androidx.navigation.NavOptions
 import androidx.navigation.findNavController
 import androidx.navigation.ui.NavigationUI
 import cz.covid19cz.erouska.R
-import cz.covid19cz.erouska.bt.BluetoothRepository
 import cz.covid19cz.erouska.databinding.ActivityMainBinding
-import cz.covid19cz.erouska.ext.hasLocationPermission
-import cz.covid19cz.erouska.ext.isLocationEnabled
-import cz.covid19cz.erouska.service.CovidService
+import cz.covid19cz.erouska.ext.isBtEnabled
 import cz.covid19cz.erouska.ui.base.BaseActivity
 import cz.covid19cz.erouska.utils.CustomTabHelper
+import cz.covid19cz.erouska.utils.L
 import kotlinx.android.synthetic.main.activity_main.*
 import org.koin.android.ext.android.inject
 
@@ -30,7 +29,6 @@ class MainActivity :
     BaseActivity<ActivityMainBinding, MainVM>(R.layout.activity_main, MainVM::class) {
 
     private val localBroadcastManager by inject<LocalBroadcastManager>()
-    private val bluetoothRepository by inject<BluetoothRepository>()
     private val customTabHelper by inject<CustomTabHelper>()
 
     private val shortcutsManager = ShortcutsManager(this)
@@ -50,22 +48,10 @@ class MainActivity :
     }
     private var connectedToCustomTabsService = false
 
-    private val serviceStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            intent?.let {
-                when (it.action) {
-                    CovidService.ACTION_MASK_STARTED -> viewModel.serviceRunning.value = true
-                    CovidService.ACTION_MASK_STOPPED -> viewModel.serviceRunning.value = false
-                }
-            }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.AppTheme)
         super.onCreate(savedInstanceState)
         setSupportActionBar(toolbar)
-        registerServiceStateReceivers()
 
         findNavController(R.id.nav_host_fragment).let {
             bottom_navigation.setOnNavigationItemSelectedListener { item ->
@@ -90,16 +76,6 @@ class MainActivity :
                 bottom_navigation.getOrCreateBadge(R.id.nav_dashboard).backgroundColor = it
             }
         })
-
-        val isRunning = CovidService.isRunning(this)
-
-        viewModel.serviceRunning.value = isRunning
-        shortcutsManager.updateShortcuts(isRunning)
-    }
-
-    override fun onDestroy() {
-        localBroadcastManager.unregisterReceiver(serviceStateReceiver)
-        super.onDestroy()
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -156,18 +132,12 @@ class MainActivity :
             }
     }
 
-    private fun registerServiceStateReceivers() {
-        localBroadcastManager.registerReceiver(
-            serviceStateReceiver,
-            IntentFilter(CovidService.ACTION_MASK_STARTED)
-        )
-        localBroadcastManager.registerReceiver(
-            serviceStateReceiver,
-            IntentFilter(CovidService.ACTION_MASK_STOPPED)
-        )
+    private fun passesRequirements(): Boolean {
+        return isBtEnabled()
     }
 
-    private fun passesRequirements(): Boolean {
-        return bluetoothRepository.isBtEnabled() && isLocationEnabled() && hasLocationPermission()
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        L.d("$requestCode")
     }
 }

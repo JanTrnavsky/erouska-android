@@ -43,8 +43,6 @@ object AppConfig {
         get() = firebaseRemoteConfig.getString("faqLink")
     val importantLink
         get() = firebaseRemoteConfig.getString("importantLink")
-    val emergencyNumber
-        get() = firebaseRemoteConfig.getString("emergencyNumber")
     val proclamationLink
         get() = getLocalized("proclamationLink")
     val aboutJson
@@ -53,6 +51,8 @@ object AppConfig {
         get() = getLocalized("termsAndConditionsLink")
     val homepageLink
         get() = getLocalized("homepageLink")
+    val chatBotLink
+        get() = getLocalized("chatBotLink")
     val showBatteryOptimizationTutorial
         get() = firebaseRemoteConfig.getBoolean("showBatteryOptimizationTutorial")
     val allowVerifyLater
@@ -75,6 +75,38 @@ object AppConfig {
         get() = getLocalized("dataCollectionMarkdown")
     val myDataText
         get() = getLocalized("myDataText")
+    val minSupportedVersionCodeAndroid
+        get() = firebaseRemoteConfig.getLong("minSupportedVersionCodeAndroid")
+    val exposureBodyTop
+        get() = firebaseRemoteConfig.getString("exposureBodyTop")
+    val exposureBodyMid
+        get() = firebaseRemoteConfig.getString("exposureBodyMid")
+    val noExposureHeader
+        get() = firebaseRemoteConfig.getString("noExposureHeader")
+    val noExposureBody
+        get() = firebaseRemoteConfig.getString("noExposureBody")
+    val mainSymptoms
+        get() = firebaseRemoteConfig.getString("mainSymptoms")
+    val spreadPrevention
+        get() = firebaseRemoteConfig.getString("spreadPrevention")
+    val earlierExposures
+        get() = firebaseRemoteConfig.getString("earlierExposures")
+    val exposureUITitle
+        get() = firebaseRemoteConfig.getString("exposureUITitle")
+    val symptomsUITitle
+        get() = firebaseRemoteConfig.getString("symptomsUITitle")
+    val spreadPreventionUITitle
+        get() = firebaseRemoteConfig.getString("spreadPreventionUITitle")
+    val recentExposuresUITitle
+        get() = firebaseRemoteConfig.getString("recentExposuresUITitle")
+    val symptomsContentJson
+        get() = getLocalized("symptomsContentJson")
+    val preventionContentJson
+        get() = getLocalized("preventionContentJson")
+    val exposureNotificationContent
+        get() = firebaseRemoteConfig.getString("exposureNotificationContent")
+    val keyExportUrl
+        get() = firebaseRemoteConfig.getString("keyExportUrl")
 
     var overrideAdvertiseTxPower: Int? = null
 
@@ -97,6 +129,7 @@ object AppConfig {
                 print()
             } else {
                 L.e("Config params update failed")
+                task.exception?.printStackTrace()
             }
         }
     }
@@ -107,6 +140,11 @@ object AppConfig {
         }
     }
 
+    /**
+     * It tries current supported language first.
+     * If it's not found, it tries English.
+     * If English is not found, it shows Czech.
+     */
     private fun getLocalized(key: String): String {
         val currentLanguage = LocaleUtils.getSupportedLanguage()
         return if (currentLanguage == "cs") {
@@ -114,9 +152,14 @@ object AppConfig {
         } else {
             val translatedValue = firebaseRemoteConfig.getString(key + "_" + currentLanguage)
             if (translatedValue.isEmpty()) {
-                firebaseRemoteConfig.getString(key)
+                val englishTranslatedValue = firebaseRemoteConfig.getString(key + "_en")
+                if (englishTranslatedValue.isEmpty()) {
+                    firebaseRemoteConfig.getString(key)
+                } else {
+                    englishTranslatedValue
+                }
             } else {
-                return translatedValue
+                translatedValue
             }
         }
     }

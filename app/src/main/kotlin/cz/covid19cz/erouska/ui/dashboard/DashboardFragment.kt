@@ -1,6 +1,9 @@
 package cz.covid19cz.erouska.ui.dashboard
 
-import android.content.*
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -8,23 +11,18 @@ import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
 import android.view.View
-import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.tbruyelle.rxpermissions2.RxPermissions
+import cz.covid19cz.erouska.AppConfig
+import cz.covid19cz.erouska.BuildConfig
 import cz.covid19cz.erouska.R
 import cz.covid19cz.erouska.databinding.FragmentPermissionssDisabledBinding
-import cz.covid19cz.erouska.ext.hasLocationPermission
-import cz.covid19cz.erouska.ext.isBatterySaverEnabled
-import cz.covid19cz.erouska.ext.isLocationEnabled
-import cz.covid19cz.erouska.ext.shareApp
-import cz.covid19cz.erouska.service.CovidService
+import cz.covid19cz.erouska.ext.*
 import cz.covid19cz.erouska.ui.base.BaseFragment
+import cz.covid19cz.erouska.ui.dashboard.event.BluetoothDisabledEvent
 import cz.covid19cz.erouska.ui.dashboard.event.DashboardCommandEvent
-import cz.covid19cz.erouska.utils.Auth
-import cz.covid19cz.erouska.utils.L
-import cz.covid19cz.erouska.utils.logoutWhenNotSignedIn
-import cz.covid19cz.erouska.utils.toText
+import cz.covid19cz.erouska.ui.dashboard.event.GmsApiErrorEvent
 import io.reactivex.disposables.CompositeDisposable
 import kotlinx.android.synthetic.main.fragment_dashboard.*
 import org.koin.android.ext.android.inject
@@ -35,30 +33,19 @@ class DashboardFragment : BaseFragment<FragmentPermissionssDisabledBinding, Dash
     DashboardVM::class
 ) {
 
+    companion object {
+        const val REQUEST_GMS_ERROR_RESOLUTION = 42
+    }
+
     private val compositeDisposable = CompositeDisposable()
     private lateinit var rxPermissions: RxPermissions
     private val localBroadcastManager by inject<LocalBroadcastManager>()
 
-    private val serviceStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            intent?.let {
-                when (it.action) {
-                    CovidService.ACTION_MASK_STARTED -> viewModel.serviceRunning.value = true
-                    CovidService.ACTION_MASK_STOPPED -> viewModel.serviceRunning.value = false
-                }
-            }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         activity?.setTitle(R.string.app_name)
-        registerServiceStateReceivers()
         rxPermissions = RxPermissions(this)
         subsribeToViewModel()
-        viewModel.init()
-        checkIfServiceIsRunning()
-        checkIfSignedIn()
     }
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {
@@ -69,13 +56,23 @@ class DashboardFragment : BaseFragment<FragmentPermissionssDisabledBinding, Dash
     private fun subsribeToViewModel() {
         subscribe(DashboardCommandEvent::class) { commandEvent ->
             when (commandEvent.command) {
-                DashboardCommandEvent.Command.TURN_ON -> tryStartBtService()
-                DashboardCommandEvent.Command.TURN_OFF -> context?.let {
-                    it.startService(CovidService.stopService(it))
-                }
-                DashboardCommandEvent.Command.PAUSE -> pauseService()
-                DashboardCommandEvent.Command.RESUME -> resumeService()
-                DashboardCommandEvent.Command.UPDATE_STATE -> updateState()
+                DashboardCommandEvent.Command.DATA_OBSOLETE -> data_notification_container.show()
+                DashboardCommandEvent.Command.RECENT_EXPOSURE -> exposure_notification_container.show()
+                DashboardCommandEvent.Command.EN_API_OFF -> showExposureNotificationsOff()
+            }
+            subscribe(BluetoothDisabledEvent::class) {
+                navigate(R.id.action_nav_dashboard_to_nav_bt_disabled)
+            }
+            subscribe(GmsApiErrorEvent::class) {
+                startIntentSenderForResult(
+                    it.status.resolution?.intentSender,
+                    REQUEST_GMS_ERROR_RESOLUTION,
+                    null,
+                    0,
+                    0,
+                    0,
+                    null
+                )
             }
         }
     }
@@ -103,7 +100,7 @@ class DashboardFragment : BaseFragment<FragmentPermissionssDisabledBinding, Dash
             .show()
     }
 
-    private fun navigateToBatterySaverSettings(onBatterySaverNotFound: () -> Unit ) {
+    private fun navigateToBatterySaverSettings(onBatterySaverNotFound: () -> Unit) {
         val batterySaverIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
             Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
         } else {
@@ -121,30 +118,29 @@ class DashboardFragment : BaseFragment<FragmentPermissionssDisabledBinding, Dash
         }
     }
 
-    private fun checkIfSignedIn() {
-        if (!Auth.isSignedIn()) {
-            logoutWhenNotSignedIn()
-        }
-    }
-
-    private fun checkIfServiceIsRunning() {
-        if (CovidService.isRunning(requireContext())) {
-            L.d("Service Covid is running")
-            viewModel.serviceRunning.value = true
-        } else {
-            viewModel.serviceRunning.value = false
-            L.d("Service Covid is not running")
-        }
-    }
-
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        if (BuildConfig.FLAVOR == "dev") {
+            debug_buttons_container.show()
+        }
+
+        exposure_notification_content.text = AppConfig.exposureNotificationContent
+        exposure_notification_close.setOnClickListener { exposure_notification_container.hide() }
+        exposure_notification_more_info.setOnClickListener { navigate(R.id.action_nav_dashboard_to_nav_exposures) }
+        data_notification_close.setOnClickListener { data_notification_container.hide() }
+
         enableUpInToolbar(false)
-        updateSecondaryText()
+
+        data_notification_close.setOnClickListener { data_notification_container.hide() }
     }
 
     override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
         inflater.inflate(R.menu.dashboard, menu)
+        if (BuildConfig.DEBUG) {
+            menu.add(0, R.id.action_sandbox, 999, "Test")
+            menu.add(0, R.id.action_news, 666, "TestNovinky")
+        }
         super.onCreateOptionsMenu(menu, inflater)
     }
 
@@ -158,78 +154,56 @@ class DashboardFragment : BaseFragment<FragmentPermissionssDisabledBinding, Dash
                 navigate(R.id.nav_about)
                 true
             }
+            R.id.action_sandbox -> {
+                navigate(R.id.nav_sandbox)
+                true
+            }
+            R.id.action_news -> {
+                navigate(R.id.nav_legacy_update_fragment)
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
 
-    override fun onBluetoothEnabled() {
-        tryStartBtService()
-    }
-
     override fun onDestroy() {
         compositeDisposable.dispose()
-        localBroadcastManager.unregisterReceiver(serviceStateReceiver)
         super.onDestroy()
     }
 
     private fun resumeService() {
-        requireContext().run {
-            startService(CovidService.resume(this))
-        }
+        viewModel.start()
     }
 
-    private fun updateSecondaryText() {
-        if (Auth.isPhoneNumberVerified()) {
-            app_running_body_secondary.text = getString(R.string.dashboard_secondary, viewModel.phoneNumber)
-        } else {
-            app_running_body_secondary.setText(R.string.dashboard_not_verified_secondary)
-        }
-    }
-
-    private fun pauseService() {
-        requireContext().run {
-            startService(CovidService.pause(this))
-        }
-    }
-
-    private fun registerServiceStateReceivers() {
-        localBroadcastManager.registerReceiver(
-            serviceStateReceiver,
-            IntentFilter(CovidService.ACTION_MASK_STARTED)
-        )
-        localBroadcastManager.registerReceiver(
-            serviceStateReceiver,
-            IntentFilter(CovidService.ACTION_MASK_STOPPED)
-        )
-    }
-
-    private fun checkRequirements(onPassed: () -> Unit = {}, onFailed: () -> Unit = {}, onBatterySaverEnabled: () -> Unit = {}) {
+    private fun checkRequirements(
+        onPassed: () -> Unit = {},
+        onFailed: () -> Unit = {},
+        onBatterySaverEnabled: () -> Unit = {}
+    ) {
         with(requireContext()) {
-            if (viewModel.bluetoothRepository.hasBle(this)) {
-                if (!viewModel.bluetoothRepository.isBtEnabled() || !isLocationEnabled() || !hasLocationPermission()) {
-                    onFailed()
-                    return
-                } else if (isBatterySaverEnabled()) {
-                    onBatterySaverEnabled()
-                } else {
-                    onPassed()
-                }
+            if (!isBtEnabled()) {
+                onFailed()
+                return
+            } else if (isBatterySaverEnabled()) {
+                onBatterySaverEnabled()
             } else {
-                showSnackBar(R.string.error_ble_unsupported)
+                onPassed()
             }
         }
     }
 
-    private fun tryStartBtService() {
-        checkRequirements(
-            {
-                ContextCompat.startForegroundService(
-                    requireContext(),
-                    CovidService.startService(requireContext())
-                )
-            },
-            { navigate(R.id.action_nav_dashboard_to_nav_bt_disabled) },
-            { showBatterySaverDialog() }
-        )
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        when (requestCode) {
+            REQUEST_GMS_ERROR_RESOLUTION -> {
+                if (resultCode == Activity.RESULT_OK) {
+                    viewModel.start()
+                }
+            }
+        }
     }
+
+    private fun showExposureNotificationsOff() {
+        navigate(R.id.action_nav_dashboard_to_nav_bt_disabled)
+    }
+
 }
